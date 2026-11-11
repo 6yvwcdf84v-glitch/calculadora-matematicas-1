@@ -497,3 +497,25 @@ int extraerMonomioAvanzado(const Node *n, double *coef, double *exponente) {
     }
     return 0;
 }
+int calcularRaizNewton(const Node *ast, double x0, double *raiz) {
+    if (!ast) return 0;
+    Node *derivada = diffAST(ast);
+    if (!derivada) return 0;
+
+    double x = x0;
+    int iter = 0;
+    while (iter < 100) {
+        int ok1 = 1, ok2 = 1;
+        double fx = evaluarAST(ast, x, &ok1);
+        double dfx = evaluarAST(derivada, x, &ok2);
+        
+        if (!ok1 || !ok2 || !isfinite(fx) || !isfinite(dfx)) break; // Sale del dominio
+        if (fabs(fx) < 1e-7) { *raiz = x; freeNode(derivada); return 1; }
+        if (fabs(dfx) < 1e-12) break; // Tangente horizontal
+        
+        x = x - (fx / dfx); // Fórmula de Newton-Raphson
+        iter++;
+    }
+    freeNode(derivada);
+    return 0; // No convergió
+}

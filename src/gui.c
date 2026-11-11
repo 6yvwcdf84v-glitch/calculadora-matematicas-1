@@ -5,11 +5,14 @@
 #include <stdlib.h>
 #include <wctype.h>
 
+#define ID_BTN_CALC_INV 1100
+#define IDM_RAICES 1101
+
 HWND campoHistorial;
 HWND campoTextoEntrada;
 HWND hwndBotonOpciones;
 
-HWND inputFilas, inputCols, btnCrearGrid, btnCalcDet, btnCalcTras;
+HWND inputFilas, inputCols, btnCrearGrid, btnCalcDet, btnCalcTras, btnCalcInv;
 HWND casillasGrid[MAX_FILAS][MAX_COLS];
 
 int g_filasActuales = 0;
@@ -56,9 +59,9 @@ void crearGridMatriz(HWND ventana, int f, int c) {
 
     for (int i = 0; i < f; i++) {
         for (int j = 0; j < c; j++) {
-            casillasGrid[i][j] = CreateWindowW(
-                L"EDIT", L"0",
-                WS_VISIBLE | WS_CHILD | WS_BORDER | ES_CENTER,
+            casillasGrid[i][j] = CreateWindowExW(
+                WS_EX_CLIENTEDGE, L"EDIT", L"0",
+                WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | ES_CENTER,
                 posXInicial + j * (ancho + 4), posYInicial + i * (alto + 4), ancho, alto,
                 ventana, NULL, NULL, NULL
             );
@@ -103,6 +106,7 @@ void mostrarControlesMatriz(int mostrar) {
     ShowWindow(btnCrearGrid, sw);
     ShowWindow(btnCalcDet, sw);
     ShowWindow(btnCalcTras, sw);
+    ShowWindow(btnCalcInv, sw);
     if (!mostrar) destruirGridMatriz();
 }
 
@@ -171,7 +175,7 @@ void procesarComandoChat(const wchar_t *expr) {
 
         case IDM_DERIVAR:
             swprintf(linea, 4096, L"DERIVADAS SUCESIVAS (Orden 1 a %d):\r\n\r\n", g_ordenActual);
-            agregarTextoLimitado(resultado, 4096, linea);
+            wcscpy(resultado, linea);
             {
                 Node *curr = copyNode(ast);
                 for (int k = 1; k <= g_ordenActual; k++) {
@@ -181,11 +185,13 @@ void procesarComandoChat(const wchar_t *expr) {
                     d = simplifyASTPuntoFijo(d);
                     wchar_t ebuf[TEXTO_CAP] = L""; astToString(d, ebuf);
                     swprintf(linea, 4096, L"f^(%d)(x) = %ls\r\n", k, ebuf);
-                    agregarTextoLimitado(resultado, 4096, linea);
+                    wcsncat(resultado, linea, 4095 - wcslen(resultado));
                     if (k == 1) {
-                        agregarTextoLimitado(resultado, 4096, verificarDerivada(ast, d) ?
-                            L"Comprobación numérica: RESULTADO VERIFICADO ✔\r\n" :
-                            L"Comprobación numérica: RESULTADO NO VERIFICADO ⚠️\r\n");
+                        if (verificarDerivada(ast, d)) {
+                            wcsncat(resultado, L"Comprobación numérica: RESULTADO VERIFICADO ✔\r\n", 4095 - wcslen(resultado));
+                        } else {
+                            wcsncat(resultado, L"Comprobación numérica: RESULTADO NO VERIFICADO ⚠️\r\n", 4095 - wcslen(resultado));
+                        }
                     }
                     freeNode(prev); curr = d;
                 }
@@ -266,7 +272,7 @@ void procesarComandoChat(const wchar_t *expr) {
                                 if (k == 0) swprintf(termino, 256, L" %+.4g", cVal);
                                 else swprintf(termino, 256, L" %+.4g·x^%d", cVal, k);
                             }
-                            agregarTextoLimitado(resultado, 4096, termino);
+                            wcsncat(resultado, termino, 4095 - wcslen(resultado));
                         }
                         
                         if (k < 4) {
@@ -277,6 +283,17 @@ void procesarComandoChat(const wchar_t *expr) {
                     }
                     freeNode(actual);
                     if (!completo || primerTermino) wcscpy(resultado, L"DESARROLLO DE MACLAURIN:\r\nP4(x) = 0 (o no evaluable en x=0)");
+                }
+            }
+            break;
+
+        case IDM_RAICES:
+            {
+                double raiz;
+                if (calcularRaizNewton(ast, 1.0, &raiz) || calcularRaizNewton(ast, 0.0, &raiz) || calcularRaizNewton(ast, -1.0, &raiz)) {
+                    swprintf(resultado, 4096, L"CÁLCULO DE RAÍCES (f(x) = 0):\r\n\r\nMétodo: Newton-Raphson\r\nCorte con el eje X detectado en: x ≈ %.6g", raiz);
+                } else {
+                    swprintf(resultado, 4096, L"CÁLCULO DE RAÍCES:\r\n\r\nEl método de Newton no convergió. Puede que la función no tenga raíces reales (ej. x^2 + 1) o requiera otro algoritmo.");
                 }
             }
             break;
@@ -319,53 +336,55 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
             campoHistorial = CreateWindowW(
                 L"EDIT",
                 L"🤖 Asistente Virtual Matemáticas I\r\n"
-                L"Soporta análisis de dominio, derivadas, integrales, series y matrices.\r\n"
+                L"Soporta Dominio, Derivadas, Integrales, MacLaurin, Raíces y Matrices.\r\n"
                 L"----------------------------------------------------------------------\r\n",
                 WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL,
                 15, 15, 500, 220,
                 ventana, (HMENU)(INT_PTR)ID_HISTORIAL, NULL, NULL
             );
 
-            hwndBotonOpciones = CreateWindowW(
-                L"BUTTON", L"Opciones ▾",
-                WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+            hwndBotonOpciones = CreateWindowExW(
+                0, L"BUTTON", L"Opciones ▾",
+                WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON,
                 15, 250, 105, 32,
                 ventana, (HMENU)(INT_PTR)ID_BOTON_OPCIONES, NULL, NULL
             );
 
-            campoTextoEntrada = CreateWindowW(
-                L"EDIT", L"1/x",
-                WS_VISIBLE | WS_CHILD | WS_BORDER | ES_AUTOHSCROLL,
+            campoTextoEntrada = CreateWindowExW(
+                WS_EX_CLIENTEDGE, L"EDIT", L"",
+                WS_VISIBLE | WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
                 125, 250, 320, 32,
                 ventana, (HMENU)(INT_PTR)ID_CAMPOTEXTO, NULL, NULL
             );
 
             procOriginalEntrada = (WNDPROC)SetWindowLongPtrW(campoTextoEntrada, GWLP_WNDPROC, (LONG_PTR)SubclasificacionEntrada);
 
-            CreateWindowW(
-                L"BUTTON", L"➔",
-                WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
+            HWND hBtnEnviar = CreateWindowExW(
+                0, L"BUTTON", L"➔",
+                WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON,
                 455, 250, 60, 32,
                 ventana, (HMENU)(INT_PTR)ID_BOTON_ENVIAR, NULL, NULL
             );
 
-            inputFilas = CreateWindowW(L"EDIT", L"3", WS_CHILD | WS_BORDER | ES_CENTER, 125, 250, 40, 32, ventana, NULL, NULL, NULL);
-            inputCols  = CreateWindowW(L"EDIT", L"3", WS_CHILD | WS_BORDER | ES_CENTER, 170, 250, 40, 32, ventana, NULL, NULL, NULL);
-            btnCrearGrid = CreateWindowW(L"BUTTON", L"Grid", WS_CHILD | BS_PUSHBUTTON, 215, 250, 55, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CREAR_GRID, NULL, NULL);
-            btnCalcDet   = CreateWindowW(L"BUTTON", L"det(A)", WS_CHILD | BS_PUSHBUTTON, 275, 250, 65, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CALC_DET, NULL, NULL);
-            btnCalcTras  = CreateWindowW(L"BUTTON", L"A^T", WS_CHILD | BS_PUSHBUTTON, 345, 250, 55, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CALC_TRAS, NULL, NULL);
+            inputFilas = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"3", WS_CHILD | WS_TABSTOP | ES_CENTER, 125, 250, 40, 32, ventana, NULL, NULL, NULL);
+            inputCols  = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"3", WS_CHILD | WS_TABSTOP | ES_CENTER, 170, 250, 40, 32, ventana, NULL, NULL, NULL);
+            btnCrearGrid = CreateWindowExW(0, L"BUTTON", L"Grid", WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON, 215, 250, 50, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CREAR_GRID, NULL, NULL);
+            btnCalcDet   = CreateWindowExW(0, L"BUTTON", L"det(A)", WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON, 270, 250, 60, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CALC_DET, NULL, NULL);
+            btnCalcTras  = CreateWindowExW(0, L"BUTTON", L"A^T", WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON, 335, 250, 50, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CALC_TRAS, NULL, NULL);
+            btnCalcInv   = CreateWindowExW(0, L"BUTTON", L"A^-1", WS_CHILD | WS_TABSTOP | BS_PUSHBUTTON, 390, 250, 50, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CALC_INV, NULL, NULL);
 
             mostrarControlesMatriz(0);
 
             SendMessageW(campoHistorial, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
             SendMessageW(hwndBotonOpciones, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
             SendMessageW(campoTextoEntrada, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
-            SendMessageW(GetDlgItem(ventana, ID_BOTON_ENVIAR), WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
+            SendMessageW(hBtnEnviar, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
             SendMessageW(inputFilas, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
             SendMessageW(inputCols, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
             SendMessageW(btnCrearGrid, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
             SendMessageW(btnCalcDet, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
             SendMessageW(btnCalcTras, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
+            SendMessageW(btnCalcInv, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
 
             return 0;
 
@@ -377,6 +396,7 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
                 if (campoHistorial && campoTextoEntrada && hwndBotonOpciones) {
                     MoveWindow(campoHistorial, 15, 15, anchoVentana - 30, altoVentana - 75, TRUE);
                     int posYInferior = altoVentana - 47;
+                    
                     MoveWindow(hwndBotonOpciones, 15, posYInferior, 105, 32, TRUE);
                     MoveWindow(campoTextoEntrada, 125, posYInferior, anchoVentana - 200, 32, TRUE);
                     
@@ -387,9 +407,10 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
 
                     MoveWindow(inputFilas, 125, posYInferior, 40, 32, TRUE);
                     MoveWindow(inputCols, 170, posYInferior, 40, 32, TRUE);
-                    MoveWindow(btnCrearGrid, 215, posYInferior, 55, 32, TRUE);
-                    MoveWindow(btnCalcDet, 275, posYInferior, 65, 32, TRUE);
-                    MoveWindow(btnCalcTras, 345, posYInferior, 55, 32, TRUE);
+                    MoveWindow(btnCrearGrid, 215, posYInferior, 50, 32, TRUE);
+                    MoveWindow(btnCalcDet, 270, posYInferior, 60, 32, TRUE);
+                    MoveWindow(btnCalcTras, 335, posYInferior, 50, 32, TRUE);
+                    MoveWindow(btnCalcInv, 390, posYInferior, 50, 32, TRUE);
 
                     if (g_modoActual == IDM_MATRICES && g_filasActuales > 0) {
                         crearGridMatriz(ventana, g_filasActuales, g_colsActuales);
@@ -423,7 +444,7 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
                     } else {
                         swprintf(res, 1024, L"DETERMINANTE CALCULADO:\r\n\r\ndet(A) = %.4g", det);
                     }
-                    agregarMensajeChat(L"Matriz ➔ det(A)", res);
+                    agregarMensajeChat(L"Matriz", res);
                 }
                 return 0;
             }
@@ -437,7 +458,24 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
                     wchar_t res[2048], mbuf[1024];
                     matrizToString(t, mbuf);
                     swprintf(res, 2048, L"MATRIZ TRASPUESTA A^T (%d x %d):\r\n\r\n%ls", t.filas, t.cols, mbuf);
-                    agregarMensajeChat(L"Matriz ➔ A^T", res);
+                    agregarMensajeChat(L"Matriz", res);
+                }
+                return 0;
+            }
+
+            if (LOWORD(wParam) == ID_BTN_CALC_INV) {
+                actualizarDimensionesDesdePantalla(ventana);
+                if (g_filasActuales > 0 && g_colsActuales > 0) {
+                    Matriz m = obtenerMatrizDePantalla();
+                    Matriz inv;
+                    if (calcularInversa(m, &inv)) {
+                        wchar_t res[2048], mbuf[1024];
+                        matrizToString(inv, mbuf);
+                        swprintf(res, 2048, L"MATRIZ INVERSA A^-1:\r\n\r\n%ls", mbuf);
+                        agregarMensajeChat(L"Matriz", res);
+                    } else {
+                        agregarMensajeChat(L"Matriz", L"ERROR MATRICIAL:\r\nLa matriz no es cuadrada o su determinante es 0. No tiene inversa.");
+                    }
                 }
                 return 0;
             }
@@ -449,14 +487,8 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
                 AppendMenuW(hMenu, MF_STRING | (g_modoActual == IDM_DERIVAR ? MF_CHECKED : 0), IDM_DERIVAR, L"📈 2. Derivar f^(n)");
                 AppendMenuW(hMenu, MF_STRING | (g_modoActual == IDM_INTEGRAR ? MF_CHECKED : 0), IDM_INTEGRAR, L"∬ 3. Integrar f(x)");
                 AppendMenuW(hMenu, MF_STRING | (g_modoActual == IDM_TAYLOR ? MF_CHECKED : 0), IDM_TAYLOR, L"📜 4. Serie de MacLaurin");
-                AppendMenuW(hMenu, MF_STRING | (g_modoActual == IDM_MATRICES ? MF_CHECKED : 0), IDM_MATRICES, L"🔢 5. Módulo de Matrices (MxN)");
-
-                AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-
-                AppendMenuW(hMenu, MF_STRING | (g_ordenActual == 1 ? MF_CHECKED : 0), IDM_ORDEN_1, L"⚙️ Orden n = 1");
-                AppendMenuW(hMenu, MF_STRING | (g_ordenActual == 2 ? MF_CHECKED : 0), IDM_ORDEN_2, L"⚙️ Orden n = 2");
-                AppendMenuW(hMenu, MF_STRING | (g_ordenActual == 3 ? MF_CHECKED : 0), IDM_ORDEN_3, L"⚙️ Orden n = 3");
-                AppendMenuW(hMenu, MF_STRING | (g_ordenActual == 4 ? MF_CHECKED : 0), IDM_ORDEN_4, L"⚙️ Orden n = 4");
+                AppendMenuW(hMenu, MF_STRING | (g_modoActual == IDM_RAICES ? MF_CHECKED : 0), IDM_RAICES, L"🎯 5. Buscar Raíces (Newton)");
+                AppendMenuW(hMenu, MF_STRING | (g_modoActual == IDM_MATRICES ? MF_CHECKED : 0), IDM_MATRICES, L"🔢 6. Módulo de Matrices (MxN)");
 
                 RECT rect;
                 GetWindowRect(hwndBotonOpciones, &rect);
@@ -470,17 +502,13 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
                 case IDM_DERIVAR:  g_modoActual = IDM_DERIVAR;  mostrarControlesMatriz(0); ShowWindow(campoTextoEntrada, SW_SHOW); break;
                 case IDM_INTEGRAR: g_modoActual = IDM_INTEGRAR; mostrarControlesMatriz(0); ShowWindow(campoTextoEntrada, SW_SHOW); break;
                 case IDM_TAYLOR:   g_modoActual = IDM_TAYLOR;   mostrarControlesMatriz(0); ShowWindow(campoTextoEntrada, SW_SHOW); break;
+                case IDM_RAICES:   g_modoActual = IDM_RAICES;   mostrarControlesMatriz(0); ShowWindow(campoTextoEntrada, SW_SHOW); break;
                 case IDM_MATRICES: 
                     g_modoActual = IDM_MATRICES; 
                     ShowWindow(campoTextoEntrada, SW_HIDE);
                     mostrarControlesMatriz(1);
                     actualizarDimensionesDesdePantalla(ventana);
                     break;
-
-                case IDM_ORDEN_1: g_ordenActual = 1; break;
-                case IDM_ORDEN_2: g_ordenActual = 2; break;
-                case IDM_ORDEN_3: g_ordenActual = 3; break;
-                case IDM_ORDEN_4: g_ordenActual = 4; break;
             }
             return 0;
 

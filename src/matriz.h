@@ -16,5 +16,6 @@ double calcularDeterminante(Matriz m);
 int calcularTraspuesta(Matriz in, Matriz *out);
 int calcularInversa(Matriz in, Matriz *out);
 void matrizToString(Matriz m, wchar_t *buf);
+int calcularInversa(Matriz m, Matriz *inv);
 
 #endif

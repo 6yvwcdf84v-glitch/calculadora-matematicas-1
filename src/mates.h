@@ -44,5 +44,6 @@ int verificarDerivada(const Node *original, const Node *derivada);
 int extraerMonomioAvanzado(const Node *n, double *coef, double *exponente);
 void decimalAFraccion(double val, long long *num, long long *den);
 void agregarTextoLimitado(wchar_t *destino, size_t capacidad, const wchar_t *texto);
+int calcularRaizNewton(const Node *ast, double x0, double *raiz);
 
 #endif

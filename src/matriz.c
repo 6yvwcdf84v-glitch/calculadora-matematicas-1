@@ -60,3 +60,46 @@ void matrizToString(Matriz m, wchar_t *buf) {
         wcscat(buf, temp);
     }
 }
+int calcularInversa(Matriz m, Matriz *inv) {
+    if (m.filas != m.cols || m.filas == 0) return 0; // Solo cuadradas
+    int n = m.filas;
+    double a[MAX_FILAS][MAX_COLS * 2];
+
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) {
+            a[i][j] = m.datos[i][j];
+            a[i][j + n] = (i == j) ? 1.0 : 0.0; // Matriz identidad adjunta
+        }
+    }
+
+    for (int i = 0; i < n; i++) {
+        int maxRow = i;
+        for (int k = i + 1; k < n; k++) {
+            if (fabs(a[k][i]) > fabs(a[maxRow][i])) maxRow = k;
+        }
+        if (fabs(a[maxRow][i]) < 1e-12) return 0; // Determinante cero (singular)
+
+        if (maxRow != i) {
+            for (int j = 0; j < 2 * n; j++) {
+                double temp = a[i][j];
+                a[i][j] = a[maxRow][j];
+                a[maxRow][j] = temp;
+            }
+        }
+        double pivote = a[i][i];
+        for (int j = 0; j < 2 * n; j++) a[i][j] /= pivote;
+
+        for (int k = 0; k < n; k++) {
+            if (k != i) {
+                double factor = a[k][i];
+                for (int j = 0; j < 2 * n; j++) a[k][j] -= factor * a[i][j];
+            }
+        }
+    }
+
+    inv->filas = n; inv->cols = n;
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < n; j++) inv->datos[i][j] = a[i][j + n];
+    }
+    return 1;
+}
