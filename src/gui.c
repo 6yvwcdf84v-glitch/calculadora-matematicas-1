@@ -46,9 +46,12 @@ void crearGridMatriz(HWND ventana, int f, int c) {
     g_filasActuales = f;
     g_colsActuales = c;
 
+    RECT rect;
+    GetClientRect(ventana, &rect);
+    int altoVentana = rect.bottom;
+    int posYInicial = altoVentana - 45 - (f * 28);
     int posXInicial = 125;
-    int posYInicial = 265;
-    int ancho = 38;
+    int ancho = 42;
     int alto = 24;
 
     for (int i = 0; i < f; i++) {
@@ -319,51 +322,80 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
                 L"Soporta análisis de dominio, derivadas, integrales, series y matrices.\r\n"
                 L"----------------------------------------------------------------------\r\n",
                 WS_VISIBLE | WS_CHILD | WS_BORDER | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL,
-                15, 15, 470, 190,
+                15, 15, 500, 220,
                 ventana, (HMENU)(INT_PTR)ID_HISTORIAL, NULL, NULL
             );
 
             hwndBotonOpciones = CreateWindowW(
                 L"BUTTON", L"Opciones ▾",
                 WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                15, 225, 105, 32,
+                15, 250, 105, 32,
                 ventana, (HMENU)(INT_PTR)ID_BOTON_OPCIONES, NULL, NULL
             );
 
             campoTextoEntrada = CreateWindowW(
                 L"EDIT", L"1/x",
                 WS_VISIBLE | WS_CHILD | WS_BORDER | ES_AUTOHSCROLL,
-                125, 225, 295, 32,
+                125, 250, 320, 32,
                 ventana, (HMENU)(INT_PTR)ID_CAMPOTEXTO, NULL, NULL
             );
 
             procOriginalEntrada = (WNDPROC)SetWindowLongPtrW(campoTextoEntrada, GWLP_WNDPROC, (LONG_PTR)SubclasificacionEntrada);
 
-            HWND hBtnEnviar = CreateWindowW(
+            CreateWindowW(
                 L"BUTTON", L"➔",
                 WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON,
-                425, 225, 60, 32,
+                455, 250, 60, 32,
                 ventana, (HMENU)(INT_PTR)ID_BOTON_ENVIAR, NULL, NULL
             );
 
-            inputFilas = CreateWindowW(L"EDIT", L"3", WS_CHILD | WS_BORDER | ES_CENTER, 125, 225, 40, 32, ventana, NULL, NULL, NULL);
-            inputCols  = CreateWindowW(L"EDIT", L"3", WS_CHILD | WS_BORDER | ES_CENTER, 170, 225, 40, 32, ventana, NULL, NULL, NULL);
-            btnCrearGrid = CreateWindowW(L"BUTTON", L"Grid", WS_CHILD | BS_PUSHBUTTON, 215, 225, 55, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CREAR_GRID, NULL, NULL);
-            btnCalcDet   = CreateWindowW(L"BUTTON", L"det(A)", WS_CHILD | BS_PUSHBUTTON, 275, 225, 65, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CALC_DET, NULL, NULL);
-            btnCalcTras  = CreateWindowW(L"BUTTON", L"A^T", WS_CHILD | BS_PUSHBUTTON, 345, 225, 55, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CALC_TRAS, NULL, NULL);
+            inputFilas = CreateWindowW(L"EDIT", L"3", WS_CHILD | WS_BORDER | ES_CENTER, 125, 250, 40, 32, ventana, NULL, NULL, NULL);
+            inputCols  = CreateWindowW(L"EDIT", L"3", WS_CHILD | WS_BORDER | ES_CENTER, 170, 250, 40, 32, ventana, NULL, NULL, NULL);
+            btnCrearGrid = CreateWindowW(L"BUTTON", L"Grid", WS_CHILD | BS_PUSHBUTTON, 215, 250, 55, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CREAR_GRID, NULL, NULL);
+            btnCalcDet   = CreateWindowW(L"BUTTON", L"det(A)", WS_CHILD | BS_PUSHBUTTON, 275, 250, 65, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CALC_DET, NULL, NULL);
+            btnCalcTras  = CreateWindowW(L"BUTTON", L"A^T", WS_CHILD | BS_PUSHBUTTON, 345, 250, 55, 32, ventana, (HMENU)(INT_PTR)ID_BTN_CALC_TRAS, NULL, NULL);
 
             mostrarControlesMatriz(0);
 
             SendMessageW(campoHistorial, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
             SendMessageW(hwndBotonOpciones, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
             SendMessageW(campoTextoEntrada, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
-            SendMessageW(hBtnEnviar, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
+            SendMessageW(GetDlgItem(ventana, ID_BOTON_ENVIAR), WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
             SendMessageW(inputFilas, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
             SendMessageW(inputCols, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
             SendMessageW(btnCrearGrid, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
             SendMessageW(btnCalcDet, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
             SendMessageW(btnCalcTras, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
 
+            return 0;
+
+        case WM_SIZE:
+            {
+                int anchoVentana = LOWORD(lParam);
+                int altoVentana = HIWORD(lParam);
+
+                if (campoHistorial && campoTextoEntrada && hwndBotonOpciones) {
+                    MoveWindow(campoHistorial, 15, 15, anchoVentana - 30, altoVentana - 75, TRUE);
+                    int posYInferior = altoVentana - 47;
+                    MoveWindow(hwndBotonOpciones, 15, posYInferior, 105, 32, TRUE);
+                    MoveWindow(campoTextoEntrada, 125, posYInferior, anchoVentana - 200, 32, TRUE);
+                    
+                    HWND hBtnEnviar = GetDlgItem(ventana, ID_BOTON_ENVIAR);
+                    if (hBtnEnviar) {
+                        MoveWindow(hBtnEnviar, anchoVentana - 70, posYInferior, 55, 32, TRUE);
+                    }
+
+                    MoveWindow(inputFilas, 125, posYInferior, 40, 32, TRUE);
+                    MoveWindow(inputCols, 170, posYInferior, 40, 32, TRUE);
+                    MoveWindow(btnCrearGrid, 215, posYInferior, 55, 32, TRUE);
+                    MoveWindow(btnCalcDet, 275, posYInferior, 65, 32, TRUE);
+                    MoveWindow(btnCalcTras, 345, posYInferior, 55, 32, TRUE);
+
+                    if (g_modoActual == IDM_MATRICES && g_filasActuales > 0) {
+                        crearGridMatriz(ventana, g_filasActuales, g_colsActuales);
+                    }
+                }
+            }
             return 0;
 
         case WM_COMMAND:
