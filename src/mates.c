@@ -3,17 +3,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wctype.h>
-#include <math.h>
 
-void agregarTextoLimitado(wchar_t *destino, size_t capacidad, const wchar_t *texto)
-{
+void agregarTextoLimitado(wchar_t *destino, size_t capacidad, const wchar_t *texto) {
+    if (!destino || !texto || capacidad == 0) return;
     size_t usados = wcslen(destino);
     if (usados >= capacidad - 1) return;
     wcsncat(destino, texto, capacidad - usados - 1);
 }
 
-void decimalAFraccion(double val, long long *num, long long *den)
-{
+void decimalAFraccion(double val, long long *num, long long *den) {
     if (fabs(val) < 1e-9) { *num = 0; *den = 1; return; }
     double signo = (val < 0) ? -1.0 : 1.0;
     double v = fabs(val);
@@ -33,148 +31,167 @@ void decimalAFraccion(double val, long long *num, long long *den)
 
 Node* createNumNode(double val) {
     Node *n = (Node*)calloc(1, sizeof(Node));
-    n->type = NODE_NUM; n->val = val; return n;
+    if (n) { n->type = NODE_NUM; n->val = val; }
+    return n;
 }
+
 Node* createVarNode(void) {
     Node *n = (Node*)calloc(1, sizeof(Node));
-    n->type = NODE_VAR; return n;
+    if (n) { n->type = NODE_VAR; }
+    return n;
 }
+
 Node* createOpNode(NodeType type, Node *left, Node *right) {
     Node *n = (Node*)calloc(1, sizeof(Node));
-    n->type = type; n->left = left; n->right = right; return n;
+    if (n) { n->type = type; n->left = left; n->right = right; }
+    return n;
 }
+
 Node* createFuncNode(NodeType type, Node *child) {
     Node *n = (Node*)calloc(1, sizeof(Node));
-    n->type = type; n->left = child; return n;
+    if (n) { n->type = type; n->left = child; }
+    return n;
 }
+
 void freeNode(Node *n) {
     if (!n) return;
-    freeNode(n->left); freeNode(n->right); free(n);
+    freeNode(n->left);
+    freeNode(n->right);
+    free(n);
 }
+
 Node* copyNode(const Node *n) {
     if (!n) return NULL;
     Node *cp = (Node*)calloc(1, sizeof(Node));
-    cp->type = n->type; cp->val = n->val;
-    cp->left = copyNode(n->left); cp->right = copyNode(n->right);
+    if (!cp) return NULL;
+    cp->type = n->type;
+    cp->val = n->val;
+    cp->left = copyNode(n->left);
+    cp->right = copyNode(n->right);
     return cp;
 }
 
-static const wchar_t *g_src;
-static int g_pos;
-static int g_parseError;
-
-Node* parseExpression(void);
-
-static int empiezaFuncion(const wchar_t *nombre) {
+static int empiezaFuncion(ParserContext *ctx, const wchar_t *nombre) {
     size_t n = wcslen(nombre);
-    size_t restante = wcslen(&g_src[g_pos]);
-    if (restante < n || wcsncmp(&g_src[g_pos], nombre, n) != 0) return 0;
-    wchar_t siguiente = g_src[g_pos + n];
-    return siguiente == L'(' || iswspace(siguiente) || siguiente == L'x' ||
-           siguiente == L'X' || siguiente == L't' || siguiente == L'T';
+    size_t restante = wcslen(&ctx->src[ctx->pos]);
+    if (restante < n || wcsncmp(&ctx->src[ctx->pos], nombre, n) != 0) return 0;
+    wchar_t sig = ctx->src[ctx->pos + n];
+    return sig == L'(' || iswspace(sig) || sig == L'x' || sig == L'X' || sig == L't' || sig == L'T' || iswdigit(sig);
 }
 
-static int empiezaFactor(void) {
-    wchar_t c = g_src[g_pos];
-    if (c == L'(' || c == L'x' || c == L'X' || c == L't' || c == L'T' ||
-        iswdigit(c) || c == L'.' || c == L'e' || c == L'E') return 1;
-    return empiezaFuncion(L"sin") || empiezaFuncion(L"sen") ||
-           empiezaFuncion(L"cos") || empiezaFuncion(L"tan") ||
-           empiezaFuncion(L"tg") || empiezaFuncion(L"ln") ||
-           empiezaFuncion(L"log") || empiezaFuncion(L"sqrt") ||
-           empiezaFuncion(L"raiz") || empiezaFuncion(L"arcsin") ||
-           empiezaFuncion(L"arcsen") || empiezaFuncion(L"arctan") ||
-           empiezaFuncion(L"arctg") || empiezaFuncion(L"exp");
+static int empiezaFactor(ParserContext *ctx) {
+    wchar_t c = ctx->src[ctx->pos];
+    if (c == L'(' || c == L'x' || c == L'X' || iswdigit(c) || c == L'.') return 1;
+    if (empiezaFuncion(ctx, L"arcsin") || empiezaFuncion(ctx, L"arcsen") ||
+        empiezaFuncion(ctx, L"arctan") || empiezaFuncion(ctx, L"arctg") ||
+        empiezaFuncion(ctx, L"sqrt")   || empiezaFuncion(ctx, L"raiz") ||
+        empiezaFuncion(ctx, L"sin")    || empiezaFuncion(ctx, L"sen") ||
+        empiezaFuncion(ctx, L"cos")    || empiezaFuncion(ctx, L"tan") ||
+        empiezaFuncion(ctx, L"tg")     || empiezaFuncion(ctx, L"ln") ||
+        empiezaFuncion(ctx, L"log")    || empiezaFuncion(ctx, L"exp")) return 1;
+    if (c == L'e' || c == L'E') return 1;
+    if (c == L't' || c == L'T') return 1;
+    return 0;
 }
 
-Node* parseUnary(void);
+static Node* parseExpression(ParserContext *ctx);
+static Node* parseUnary(ParserContext *ctx);
 
-Node* parsePrimary(void) {
-    while (g_src[g_pos] != L'\0' && iswspace(g_src[g_pos])) g_pos++;
-    if (g_src[g_pos] == L'(') {
-        g_pos++;
-        Node *n = parseExpression();
-        while (g_src[g_pos] != L'\0' && iswspace(g_src[g_pos])) g_pos++;
-        if (g_src[g_pos] != L')') { g_parseError = 1; freeNode(n); return NULL; }
-        g_pos++;
+static Node* parsePrimary(ParserContext *ctx) {
+    while (ctx->src[ctx->pos] != L'\0' && iswspace(ctx->src[ctx->pos])) ctx->pos++;
+    
+    if (ctx->src[ctx->pos] == L'(') {
+        ctx->pos++;
+        Node *n = parseExpression(ctx);
+        while (ctx->src[ctx->pos] != L'\0' && iswspace(ctx->src[ctx->pos])) ctx->pos++;
+        if (ctx->src[ctx->pos] != L')') { ctx->error = 1; freeNode(n); return NULL; }
+        ctx->pos++;
         return n;
     }
+
     struct { const wchar_t *name; NodeType type; int len; } funcs[] = {
         {L"arcsin", NODE_ARCSIN, 6}, {L"arcsen", NODE_ARCSIN, 6},
         {L"arctan", NODE_ARCTAN, 6}, {L"arctg", NODE_ARCTAN, 5},
-        {L"sqrt", NODE_SQRT, 4}, {L"raiz", NODE_SQRT, 4},
-        {L"sin", NODE_SIN, 3}, {L"sen", NODE_SIN, 3},
-        {L"cos", NODE_COS, 3}, {L"tan", NODE_TAN, 3},
-        {L"tg", NODE_TAN, 2}, {L"ln", NODE_LN, 2},
-        {L"log", NODE_LN, 3}, {L"exp", NODE_EXP, 3}
+        {L"sqrt", NODE_SQRT, 4},   {L"raiz", NODE_SQRT, 4},
+        {L"sin", NODE_SIN, 3},     {L"sen", NODE_SIN, 3},
+        {L"cos", NODE_COS, 3},     {L"tan", NODE_TAN, 3},
+        {L"tg", NODE_TAN, 2},      {L"ln", NODE_LN, 2},
+        {L"log", NODE_LN, 3},      {L"exp", NODE_EXP, 3}
     };
+
     for (size_t i = 0; i < sizeof(funcs)/sizeof(funcs[0]); i++) {
-        if (empiezaFuncion(funcs[i].name)) {
-            g_pos += funcs[i].len;
-            Node *arg = parseUnary();
+        if (empiezaFuncion(ctx, funcs[i].name)) {
+            ctx->pos += funcs[i].len;
+            Node *arg = parseUnary(ctx);
             if (!arg) return NULL;
             return createFuncNode(funcs[i].type, arg);
         }
     }
-    if (g_src[g_pos] == L'e' && g_src[g_pos+1] == L'^') {
-        g_pos += 2;
-        Node *arg = parseUnary();
+
+    if (ctx->src[ctx->pos] == L'e' && ctx->src[ctx->pos+1] == L'^') {
+        ctx->pos += 2;
+        Node *arg = parseUnary(ctx);
         if (!arg) return NULL;
         return createFuncNode(NODE_EXP, arg);
     }
-    if ((g_src[g_pos] == L'e' || g_src[g_pos] == L'E') &&
-        !iswalpha(g_src[g_pos+1]) && g_src[g_pos+1] != L'^') {
-        g_pos++; return createNumNode(exp(1.0));
+
+    if ((ctx->src[ctx->pos] == L'e' || ctx->src[ctx->pos] == L'E') && !iswalpha(ctx->src[ctx->pos+1]) && ctx->src[ctx->pos+1] != L'^') {
+        ctx->pos++;
+        return createNumNode(exp(1.0));
     }
-    if (g_src[g_pos] == L'x' || g_src[g_pos] == L'X' || g_src[g_pos] == L't' || g_src[g_pos] == L'T') {
-        g_pos++; return createVarNode();
+
+    if (ctx->src[ctx->pos] == L'x' || ctx->src[ctx->pos] == L'X' || ctx->src[ctx->pos] == L't' || ctx->src[ctx->pos] == L'T') {
+        ctx->pos++;
+        return createVarNode();
     }
-    if (iswdigit(g_src[g_pos]) || g_src[g_pos] == L'.') {
+
+    if (iswdigit(ctx->src[ctx->pos]) || ctx->src[ctx->pos] == L'.') {
         wchar_t *endPtr;
-        double val = wcstod(&g_src[g_pos], &endPtr);
-        if (endPtr == &g_src[g_pos] || !isfinite(val)) { g_parseError = 1; return NULL; }
-        g_pos = (int)(endPtr - g_src);
+        double val = wcstod(&ctx->src[ctx->pos], &endPtr);
+        if (endPtr == &ctx->src[ctx->pos] || !isfinite(val)) { ctx->error = 1; return NULL; }
+        ctx->pos = (int)(endPtr - ctx->src);
         return createNumNode(val);
     }
-    g_parseError = 1;
+
+    ctx->error = 1;
     return NULL;
 }
 
-Node* parsePower(void) {
-    Node *left = parsePrimary();
+static Node* parsePower(ParserContext *ctx) {
+    Node *left = parsePrimary(ctx);
     if (!left) return NULL;
-    if (g_src[g_pos] == L'^') {
-        g_pos++;
-        Node *right = parseUnary();
+    if (ctx->src[ctx->pos] == L'^') {
+        ctx->pos++;
+        Node *right = parseUnary(ctx);
         if (!right) { freeNode(left); return NULL; }
         return createOpNode(NODE_POW, left, right);
     }
     return left;
 }
 
-Node* parseUnary(void) {
-    if (g_src[g_pos] == L'+') { g_pos++; return parseUnary(); }
-    if (g_src[g_pos] == L'-') {
-        g_pos++;
-        Node *child = parseUnary();
+static Node* parseUnary(ParserContext *ctx) {
+    if (ctx->src[ctx->pos] == L'+') { ctx->pos++; return parseUnary(ctx); }
+    if (ctx->src[ctx->pos] == L'-') {
+        ctx->pos++;
+        Node *child = parseUnary(ctx);
         if (!child) return NULL;
         return createOpNode(NODE_SUB, createNumNode(0), child);
     }
-    return parsePower();
+    return parsePower(ctx);
 }
 
-Node* parseTerm(void) {
-    Node *left = parseUnary();
+static Node* parseTerm(ParserContext *ctx) {
+    Node *left = parseUnary(ctx);
     if (!left) return NULL;
     for (;;) {
-        wchar_t op = g_src[g_pos];
+        wchar_t op = ctx->src[ctx->pos];
         if (op == L'*' || op == L'/') {
-            g_pos++;
-            Node *right = parseUnary();
+            ctx->pos++;
+            Node *right = parseUnary(ctx);
             if (!right) { freeNode(left); return NULL; }
             left = createOpNode(op == L'*' ? NODE_MUL : NODE_DIV, left, right);
-        } else if (empiezaFactor()) {
-            Node *right = parseUnary();
+        } else if (empiezaFactor(ctx)) {
+            Node *right = parseUnary(ctx);
             if (!right) { freeNode(left); return NULL; }
             left = createOpNode(NODE_MUL, left, right);
         } else break;
@@ -182,12 +199,12 @@ Node* parseTerm(void) {
     return left;
 }
 
-Node* parseExpression(void) {
-    Node *left = parseTerm();
+static Node* parseExpression(ParserContext *ctx) {
+    Node *left = parseTerm(ctx);
     if (!left) return NULL;
-    while (g_src[g_pos] == L'+' || g_src[g_pos] == L'-') {
-        wchar_t op = g_src[g_pos++];
-        Node *right = parseTerm();
+    while (ctx->src[ctx->pos] == L'+' || ctx->src[ctx->pos] == L'-') {
+        wchar_t op = ctx->src[ctx->pos++];
+        Node *right = parseTerm(ctx);
         if (!right) { freeNode(left); return NULL; }
         left = createOpNode(op == L'+' ? NODE_ADD : NODE_SUB, left, right);
     }
@@ -195,10 +212,11 @@ Node* parseExpression(void) {
 }
 
 Node* buildAST(const wchar_t *expr) {
-    g_src = expr; g_pos = 0; g_parseError = 0;
-    Node *root = parseExpression();
-    while (g_src[g_pos] != L'\0' && iswspace(g_src[g_pos])) g_pos++;
-    if (g_parseError || g_src[g_pos] != L'\0') { freeNode(root); return NULL; }
+    if (!expr) return NULL;
+    ParserContext ctx = { expr, 0, 0 };
+    Node *root = parseExpression(&ctx);
+    while (ctx.src[ctx.pos] != L'\0' && iswspace(ctx.src[ctx.pos])) ctx.pos++;
+    if (ctx.error || ctx.src[ctx.pos] != L'\0') { freeNode(root); return NULL; }
     return root;
 }
 
@@ -206,37 +224,81 @@ Node* simplifyAST(Node *n) {
     if (!n) return NULL;
     n->left = simplifyAST(n->left);
     n->right = simplifyAST(n->right);
-    if ((n->type >= NODE_ADD && n->type <= NODE_POW) && (!n->left || !n->right)) return n;
 
     if (n->type == NODE_ADD) {
-        if (n->left->type == NODE_NUM && n->left->val == 0) { Node *tmp = copyNode(n->right); freeNode(n); return tmp; }
-        if (n->right->type == NODE_NUM && n->right->val == 0) { Node *tmp = copyNode(n->left); freeNode(n); return tmp; }
-        if (n->left->type == NODE_NUM && n->right->type == NODE_NUM) { double v = n->left->val + n->right->val; freeNode(n); return createNumNode(v); }
+        if (n->left && n->left->type == NODE_NUM && n->left->val == 0) {
+            Node *res = n->right; n->right = NULL; freeNode(n); return res;
+        }
+        if (n->right && n->right->type == NODE_NUM && n->right->val == 0) {
+            Node *res = n->left; n->left = NULL; freeNode(n); return res;
+        }
+        if (n->left && n->right && n->left->type == NODE_NUM && n->right->type == NODE_NUM) {
+            double v = n->left->val + n->right->val; freeNode(n); return createNumNode(v);
+        }
     } else if (n->type == NODE_SUB) {
-        if (n->left->type == NODE_NUM && n->left->val == 0) {
-            if (n->right->type == NODE_SUB && n->right->left->type == NODE_NUM && n->right->left->val == 0) {
-                Node *tmp = copyNode(n->right->right); freeNode(n); return tmp;
+        if (n->left && n->left->type == NODE_NUM && n->left->val == 0) {
+            if (n->right && n->right->type == NODE_SUB && n->right->left && n->right->left->type == NODE_NUM && n->right->left->val == 0) {
+                Node *res = n->right->right; n->right->right = NULL; freeNode(n); return res;
             }
         }
-        if (n->right->type == NODE_NUM && n->right->val == 0) { Node *tmp = copyNode(n->left); freeNode(n); return tmp; }
-        if (n->left->type == NODE_NUM && n->right->type == NODE_NUM) { double v = n->left->val - n->right->val; freeNode(n); return createNumNode(v); }
+        if (n->right && n->right->type == NODE_NUM && n->right->val == 0) {
+            Node *res = n->left; n->left = NULL; freeNode(n); return res;
+        }
+        if (n->left && n->right && n->left->type == NODE_NUM && n->right->type == NODE_NUM) {
+            double v = n->left->val - n->right->val; freeNode(n); return createNumNode(v);
+        }
     } else if (n->type == NODE_MUL) {
-        if ((n->left->type == NODE_NUM && n->left->val == 0) || (n->right->type == NODE_NUM && n->right->val == 0)) { freeNode(n); return createNumNode(0); }
-        if (n->left->type == NODE_NUM && n->left->val == 1) { Node *tmp = copyNode(n->right); freeNode(n); return tmp; }
-        if (n->right->type == NODE_NUM && n->right->val == 1) { Node *tmp = copyNode(n->left); freeNode(n); return tmp; }
-        if (n->left->type == NODE_NUM && n->right->type == NODE_NUM) { double v = n->left->val * n->right->val; freeNode(n); return createNumNode(v); }
+        if ((n->left && n->left->type == NODE_NUM && n->left->val == 0) || (n->right && n->right->type == NODE_NUM && n->right->val == 0)) {
+            freeNode(n); return createNumNode(0);
+        }
+        if (n->left && n->left->type == NODE_NUM && n->left->val == 1) {
+            Node *res = n->right; n->right = NULL; freeNode(n); return res;
+        }
+        if (n->right && n->right->type == NODE_NUM && n->right->val == 1) {
+            Node *res = n->left; n->left = NULL; freeNode(n); return res;
+        }
+        if (n->left && n->right && n->left->type == NODE_NUM && n->right->type == NODE_NUM) {
+            double v = n->left->val * n->right->val; freeNode(n); return createNumNode(v);
+        }
     } else if (n->type == NODE_DIV) {
-        if (n->left->type == NODE_NUM && n->left->val == 0) { freeNode(n); return createNumNode(0); }
-        if (n->right->type == NODE_NUM && n->right->val == 1) { Node *tmp = copyNode(n->left); freeNode(n); return tmp; }
+        if (n->left && n->left->type == NODE_NUM && n->left->val == 0) { freeNode(n); return createNumNode(0); }
+        if (n->right && n->right->type == NODE_NUM && n->right->val == 1) {
+            Node *res = n->left; n->left = NULL; freeNode(n); return res;
+        }
+        if (n->left && n->right && n->left->type == NODE_NUM && n->right->type == NODE_NUM && n->right->val != 0) {
+            double v = n->left->val / n->right->val; freeNode(n); return createNumNode(v);
+        }
     } else if (n->type == NODE_POW) {
-        if (n->right->type == NODE_NUM && n->right->val == 0) { freeNode(n); return createNumNode(1); }
-        if (n->right->type == NODE_NUM && n->right->val == 1) { Node *tmp = copyNode(n->left); freeNode(n); return tmp; }
+        if (n->right && n->right->type == NODE_NUM && n->right->val == 0) { freeNode(n); return createNumNode(1); }
+        if (n->right && n->right->type == NODE_NUM && n->right->val == 1) {
+            Node *res = n->left; n->left = NULL; freeNode(n); return res;
+        }
+    }
+    return n;
+}
+
+static int nodosIguales(const Node *a, const Node *b) {
+    if (!a && !b) return 1;
+    if (!a || !b) return 0;
+    if (a->type != b->type || a->val != b->val) return 0;
+    return nodosIguales(a->left, b->left) && nodosIguales(a->right, b->right);
+}
+
+Node* simplifyASTPuntoFijo(Node *n) {
+    if (!n) return NULL;
+    int pasadas = 0;
+    while (pasadas < 10) {
+        Node *prev = copyNode(n);
+        n = simplifyAST(n);
+        if (nodosIguales(prev, n)) { freeNode(prev); break; }
+        freeNode(prev);
+        pasadas++;
     }
     return n;
 }
 
 void astToString(const Node *n, wchar_t *buf) {
-    if (!n) return;
+    if (!n || !buf) return;
     wchar_t temp[256];
     switch (n->type) {
         case NODE_NUM:
@@ -252,36 +314,40 @@ void astToString(const Node *n, wchar_t *buf) {
         case NODE_ADD:
             astToString(n->left, buf); agregarTextoLimitado(buf, TEXTO_CAP, L" + "); astToString(n->right, buf); break;
         case NODE_SUB:
-            if (n->left->type == NODE_NUM && n->left->val == 0) {
+            if (n->left && n->left->type == NODE_NUM && n->left->val == 0) {
                 agregarTextoLimitado(buf, TEXTO_CAP, L"-");
-                if (n->right->type == NODE_ADD || n->right->type == NODE_SUB) { agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->right, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")"); }
-                else astToString(n->right, buf);
+                if (n->right && (n->right->type == NODE_ADD || n->right->type == NODE_SUB)) {
+                    agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->right, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")");
+                } else astToString(n->right, buf);
             } else {
                 astToString(n->left, buf); agregarTextoLimitado(buf, TEXTO_CAP, L" - ");
-                if (n->right->type == NODE_ADD || n->right->type == NODE_SUB) { agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->right, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")"); }
-                else astToString(n->right, buf);
+                if (n->right && (n->right->type == NODE_ADD || n->right->type == NODE_SUB)) {
+                    agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->right, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")");
+                } else astToString(n->right, buf);
             }
             break;
         case NODE_MUL:
-            if (n->left->type == NODE_NUM && n->right->type == NODE_VAR) {
+            if (n->left && n->right && n->left->type == NODE_NUM && n->right->type == NODE_VAR) {
                 if (n->left->val == 1) agregarTextoLimitado(buf, TEXTO_CAP, L"x");
                 else if (n->left->val == -1) agregarTextoLimitado(buf, TEXTO_CAP, L"-x");
                 else { astToString(n->left, buf); agregarTextoLimitado(buf, TEXTO_CAP, L"x"); }
             } else {
-                if (n->left->type == NODE_ADD || n->left->type == NODE_SUB) { agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->left, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")"); }
-                else astToString(n->left, buf);
+                if (n->left && (n->left->type == NODE_ADD || n->left->type == NODE_SUB)) {
+                    agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->left, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")");
+                } else astToString(n->left, buf);
                 agregarTextoLimitado(buf, TEXTO_CAP, L"·");
-                if (n->right->type == NODE_ADD || n->right->type == NODE_SUB) { agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->right, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")"); }
-                else astToString(n->right, buf);
+                if (n->right && (n->right->type == NODE_ADD || n->right->type == NODE_SUB)) {
+                    agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->right, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")");
+                } else astToString(n->right, buf);
             }
             break;
         case NODE_DIV:
             agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->left, buf); agregarTextoLimitado(buf, TEXTO_CAP, L") / ("); astToString(n->right, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")"); break;
         case NODE_POW:
-            if (n->left->type == NODE_VAR || n->left->type == NODE_NUM) astToString(n->left, buf);
+            if (n->left && (n->left->type == NODE_VAR || n->left->type == NODE_NUM)) astToString(n->left, buf);
             else { agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->left, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")"); }
             agregarTextoLimitado(buf, TEXTO_CAP, L"^");
-            if (n->right->type == NODE_VAR || n->right->type == NODE_NUM) astToString(n->right, buf);
+            if (n->right && (n->right->type == NODE_VAR || n->right->type == NODE_NUM)) astToString(n->right, buf);
             else { agregarTextoLimitado(buf, TEXTO_CAP, L"("); astToString(n->right, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")"); }
             break;
         case NODE_SIN: agregarTextoLimitado(buf, TEXTO_CAP, L"sin("); astToString(n->left, buf); agregarTextoLimitado(buf, TEXTO_CAP, L")"); break;
@@ -313,7 +379,7 @@ Node* diffAST(const Node *n) {
                     createOpNode(NODE_MUL, copyNode(n->left), diffAST(n->right))
                 ), createOpNode(NODE_POW, copyNode(n->right), createNumNode(2)));
         case NODE_POW:
-            if (n->right->type == NODE_NUM) {
+            if (n->right && n->right->type == NODE_NUM) {
                 double p = n->right->val;
                 return createOpNode(NODE_MUL,
                     createOpNode(NODE_MUL, createNumNode(p), createOpNode(NODE_POW, copyNode(n->left), createNumNode(p - 1))),
@@ -354,7 +420,7 @@ int contieneVariable(const Node *n) {
 }
 
 double evaluarAST(const Node *n, double x, int *ok) {
-    if (!n || !*ok) { *ok = 0; return NAN; }
+    if (!n || !*ok) { if (ok) *ok = 0; return NAN; }
     double a, b, v;
     switch (n->type) {
         case NODE_NUM: return n->val;
@@ -388,45 +454,46 @@ double evaluarAST(const Node *n, double x, int *ok) {
 
 int verificarDerivada(const Node *original, const Node *derivada) {
     const double puntos[] = {-1.37, -0.63, 0.41, 1.29};
-    int validos=0;
-    for (size_t i=0;i<sizeof(puntos)/sizeof(puntos[0]);i++) {
-        double x=puntos[i], h=1e-5; int ok1=1,ok2=1,ok3=1;
-        double fp=evaluarAST(original,x+h,&ok1), fm=evaluarAST(original,x-h,&ok2);
-        double ds=evaluarAST(derivada,x,&ok3);
+    int validos = 0;
+    for (size_t i = 0; i < sizeof(puntos)/sizeof(puntos[0]); i++) {
+        double x = puntos[i], h = 1e-5; int ok1 = 1, ok2 = 1, ok3 = 1;
+        double fp = evaluarAST(original, x+h, &ok1), fm = evaluarAST(original, x-h, &ok2);
+        double ds = evaluarAST(derivada, x, &ok3);
         if (!ok1 || !ok2 || !ok3) continue;
-        double dn=(fp-fm)/(2*h);
-        if (!isfinite(dn) || !isfinite(ds) || fabs(dn-ds)>2e-4*(1+fabs(dn))) return 0;
+        double dn = (fp - fm) / (2 * h);
+        if (!isfinite(dn) || !isfinite(ds) || fabs(dn - ds) > 2e-4 * (1 + fabs(dn))) return 0;
         validos++;
     }
-    return validos>=2;
+    return validos >= 2;
 }
 
 int extraerMonomioAvanzado(const Node *n, double *coef, double *exponente) {
-    if (!n) return 0;
-    *coef = 1.0;
-    if (n->type == NODE_NUM) { *coef = n->val; *exponente = 0.0; return 1; }
+    if (!n || !coef || !exponente) return 0;
+    if (n->type == NODE_NUM) { *coef *= n->val; *exponente = 0.0; return 1; }
     if (n->type == NODE_VAR) { *exponente = 1.0; return 1; }
     if (n->type == NODE_SQRT && n->left && n->left->type == NODE_VAR) { *exponente = 0.5; return 1; }
     if (n->type == NODE_POW && n->left && n->left->type == NODE_VAR) {
-        if (n->right->type == NODE_NUM) { *exponente = n->right->val; return 1; }
-        if (n->right->type == NODE_SUB && n->right->left->type == NODE_NUM && n->right->left->val == 0 && n->right->right->type == NODE_NUM) {
+        if (n->right && n->right->type == NODE_NUM) { *exponente = n->right->val; return 1; }
+        if (n->right && n->right->type == NODE_SUB && n->right->left && n->right->left->type == NODE_NUM && n->right->left->val == 0 && n->right->right && n->right->right->type == NODE_NUM) {
             *exponente = -n->right->right->val; return 1;
         }
     }
     if (n->type == NODE_DIV) {
-        if (n->left->type == NODE_NUM && n->right->type == NODE_VAR) {
-            *coef = n->left->val; *exponente = -1.0; return 1;
+        if (n->left && n->left->type == NODE_NUM && n->right && n->right->type == NODE_VAR) {
+            *coef *= n->left->val; *exponente = -1.0; return 1;
         }
-        if (n->left->type == NODE_NUM && n->right->type == NODE_POW && n->right->left->type == NODE_VAR && n->right->right->type == NODE_NUM) {
-            *coef = n->left->val; *exponente = -n->right->right->val; return 1;
+        if (n->left && n->left->type == NODE_NUM && n->right && n->right->type == NODE_POW && n->right->left && n->right->left->type == NODE_VAR && n->right->right && n->right->right->type == NODE_NUM) {
+            *coef *= n->left->val; *exponente = -n->right->right->val; return 1;
         }
     }
     if (n->type == NODE_MUL) {
-        const Node *pot = NULL;
-        if (n->left && n->left->type == NODE_NUM) { *coef=n->left->val; pot=n->right; }
-        else if (n->right && n->right->type == NODE_NUM) { *coef=n->right->val; pot=n->left; }
-        if (!pot) return 0;
-        return extraerMonomioAvanzado(pot, &(double){1.0}, exponente);
+        if (n->left && n->left->type == NODE_NUM) {
+            *coef *= n->left->val;
+            return extraerMonomioAvanzado(n->right, coef, exponente);
+        } else if (n->right && n->right->type == NODE_NUM) {
+            *coef *= n->right->val;
+            return extraerMonomioAvanzado(n->left, coef, exponente);
+        }
     }
     return 0;
 }

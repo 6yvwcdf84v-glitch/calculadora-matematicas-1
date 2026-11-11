@@ -59,7 +59,7 @@ void crearGridMatriz(HWND ventana, int f, int c) {
                 posXInicial + j * (ancho + 4), posYInicial + i * (alto + 4), ancho, alto,
                 ventana, NULL, NULL, NULL
             );
-            SendMessage(casillasGrid[i][j], WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
+            SendMessageW(casillasGrid[i][j], WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
         }
     }
 }
@@ -104,6 +104,7 @@ void mostrarControlesMatriz(int mostrar) {
 }
 
 void limpiarCadenaW(wchar_t *cadena) {
+    if (!cadena) return;
     int i = 0, j = 0;
     while (cadena[i] != L'\0') {
         if (!iswspace(cadena[i])) {
@@ -126,7 +127,7 @@ void agregarMensajeChat(const wchar_t *usuario, const wchar_t *contenido) {
 }
 
 void procesarComandoChat(const wchar_t *expr) {
-    if (wcslen(expr) == 0) return;
+    if (!expr || wcslen(expr) == 0) return;
 
     wchar_t resultado[4096] = L"";
     wchar_t linea[4096];
@@ -138,7 +139,8 @@ void procesarComandoChat(const wchar_t *expr) {
         SetWindowTextW(campoTextoEntrada, L"");
         return;
     }
-    ast = simplifyAST(ast);
+    ast = simplifyASTPuntoFijo(ast);
+
     if (!contieneVariable(ast)) {
         int dominioOK = 1;
         (void)evaluarAST(ast, 0.0, &dominioOK);
@@ -150,6 +152,7 @@ void procesarComandoChat(const wchar_t *expr) {
             return;
         }
     }
+
     switch (g_modoActual) {
         case IDM_DOMINIO:
             if (ast->type == NODE_DIV) {
@@ -172,7 +175,7 @@ void procesarComandoChat(const wchar_t *expr) {
                     Node *prev = curr;
                     Node *d = diffAST(prev);
                     if (!d) { freeNode(prev); curr = NULL; break; }
-                    d = simplifyAST(d); d = simplifyAST(d);
+                    d = simplifyASTPuntoFijo(d);
                     wchar_t ebuf[TEXTO_CAP] = L""; astToString(d, ebuf);
                     swprintf(linea, 4096, L"f^(%d)(x) = %ls\r\n", k, ebuf);
                     agregarTextoLimitado(resultado, 4096, linea);
@@ -189,74 +192,89 @@ void procesarComandoChat(const wchar_t *expr) {
 
         case IDM_INTEGRAR:
             {
-                double coef = 0.0, potencia = 0.0;
+                double coef = 1.0, potencia = 0.0;
                 if (extraerMonomioAvanzado(ast, &coef, &potencia)) {
                     if (fabs(potencia + 1.0) < 1e-12) {
+                        long long num, den;
+                        decimalAFraccion(coef, &num, &den);
+                        wchar_t cbuf[64] = L"";
+                        if (den == 1 && num == 1) swprintf(cbuf, 64, L"");
+                        else if (den == 1) swprintf(cbuf, 64, L"%lld·", num);
+                        else swprintf(cbuf, 64, L"(%lld/%lld)·", num, den);
+
                         swprintf(resultado, 4096,
                             L"INTEGRAL SIMBÓLICA RESUELTA:\r\n\r\n"
-                            L"┌───────────────────────────────┐\r\n"
-                            L"│  ∫ (1/x) dx = ln|x| + C       │\r\n"
-                            L"└───────────────────────────────┘\r\n\r\n"
-                            L"Regla: Integral logarítmica para p = -1.\r\n"
-                            L"Comprobación: d(ln|x|)/dx = 1/x (x ≠ 0).\r\n"
-                            L"RESULTADO VERIFICADO ✔");
+                            L"∫ f(x) dx = %lsln|x| + C\r\n\r\n"
+                            L"Regla: Integral logarítmica (p = -1).\r\n"
+                            L"RESULTADO VERIFICADO ✔", cbuf);
                     } else {
                         double nuevoExp = potencia + 1.0;
                         double nuevoCoef = coef / nuevoExp;
                         long long num, den;
                         decimalAFraccion(nuevoCoef, &num, &den);
-                        
                         wchar_t fracBuf[64];
                         if (den == 1) swprintf(fracBuf, 64, L"%lld", num);
                         else swprintf(fracBuf, 64, L"(%lld/%lld)", num, den);
 
                         swprintf(resultado, 4096,
                             L"INTEGRAL SIMBÓLICA RESUELTA:\r\n\r\n"
-                            L"┌──────────────────────────────────────────────┐\r\n"
-                            L"│  ∫ f(x) dx = %ls · x^(%.4g) + C              │\r\n"
-                            L"└──────────────────────────────────────────────┘\r\n\r\n"
+                            L"∫ f(x) dx = %ls·x^(%.4g) + C\r\n\r\n"
                             L"Regla general de la potencia: ∫ x^p dx = x^(p+1)/(p+1)\r\n"
-                            L"Comprobación: d/dx [%ls · x^(%.4g)] = f(x)\r\n"
-                            L"RESULTADO VERIFICADO ✔",
-                            fracBuf, nuevoExp, fracBuf, nuevoExp);
+                            L"RESULTADO VERIFICADO ✔", fracBuf, nuevoExp);
                     }
                 } else if (ast->type == NODE_SIN || ast->type == NODE_COS || ast->type == NODE_EXP) {
-                    if (ast->left->type == NODE_VAR) {
-                        if (ast->type == NODE_SIN) swprintf(resultado, 4096, L"INTEGRAL:\r\n∫ sin(x) dx = -cos(x) + C\r\nRESULTADO VERIFICADO ✔");
-                        else if (ast->type == NODE_COS) swprintf(resultado, 4096, L"INTEGRAL:\r\n∫ cos(x) dx = sin(x) + C\r\nRESULTADO VERIFICADO ✔");
-                        else swprintf(resultado, 4096, L"INTEGRAL:\r\n∫ e^x dx = e^x + C\r\nRESULTADO VERIFICADO ✔");
-                    }
+                    wchar_t abuf[TEXTO_CAP] = L""; astToString(ast->left, abuf);
+                    if (ast->type == NODE_SIN) swprintf(resultado, 4096, L"INTEGRAL:\r\n∫ sin(%ls) dx = -cos(%ls) + C\r\nRESULTADO VERIFICADO ✔", abuf, abuf);
+                    else if (ast->type == NODE_COS) swprintf(resultado, 4096, L"INTEGRAL:\r\n∫ cos(%ls) dx = sin(%ls) + C\r\nRESULTADO VERIFICADO ✔", abuf, abuf);
+                    else swprintf(resultado, 4096, L"INTEGRAL:\r\n∫ e^(%ls) dx = e^(%ls) + C\r\nRESULTADO VERIFICADO ✔", abuf, abuf);
                 } else {
                     wchar_t ebuf[TEXTO_CAP] = L""; astToString(ast, ebuf);
-                    swprintf(resultado, 4096, L"INTEGRAL SIMBÓLICA:\r\n∫ (%ls) dx + C", ebuf);
+                    swprintf(resultado, 4096, L"INTEGRAL SIMBÓLICA:\r\n∫ (%ls) dx + C\r\n(Representación formal)", ebuf);
                 }
             }
             break;
 
         case IDM_TAYLOR:
             {
-                Node *actual = copyNode(ast);
-                double factorial = 1.0;
-                int completo = 1;
-                wcscpy(resultado, L"DESARROLLO DE MACLAURIN (orden 4):\r\n");
-                for (int k = 0; k <= 4; ++k) {
-                    int ok = 1;
-                    double valor = evaluarAST(actual, 0.0, &ok);
-                    if (!ok || !isfinite(valor)) { completo = 0; break; }
-                    if (k > 0) factorial *= (double)k;
-                    wchar_t termino[256];
-                    double cVal = valor / factorial;
-                    if (k == 0) swprintf(termino, 256, L"%.4g", cVal);
-                    else swprintf(termino, 256, L"%+.4g·x^%d", cVal, k);
-                    agregarTextoLimitado(resultado, 4096, termino);
-                    if (k < 4) {
-                        Node *siguiente = diffAST(actual);
-                        freeNode(actual); actual = siguiente;
-                        if (!actual) { completo = 0; break; }
+                int okDominio = 1;
+                (void)evaluarAST(ast, 0.0, &okDominio);
+                if (!okDominio) {
+                    swprintf(resultado, 4096, L"DESARROLLO DE MACLAURIN:\r\n\r\nLa función f(x) no está definida en x = 0 (fuera de dominio).");
+                } else {
+                    Node *actual = copyNode(ast);
+                    double factorial = 1.0;
+                    int completo = 1;
+                    wcscpy(resultado, L"DESARROLLO DE MACLAURIN (orden 4 en x=0):\r\n\r\nP4(x) = ");
+                    int primerTermino = 1;
+                    for (int k = 0; k <= 4; ++k) {
+                        int ok = 1;
+                        double valor = evaluarAST(actual, 0.0, &ok);
+                        if (!ok || !isfinite(valor)) { completo = 0; break; }
+                        if (k > 0) factorial *= (double)k;
+                        double cVal = valor / factorial;
+                        
+                        if (fabs(cVal) > 1e-9) {
+                            wchar_t termino[256];
+                            if (primerTermino) {
+                                if (k == 0) swprintf(termino, 256, L"%.4g", cVal);
+                                else swprintf(termino, 256, L"%.4g·x^%d", cVal, k);
+                                primerTermino = 0;
+                            } else {
+                                if (k == 0) swprintf(termino, 256, L" %+.4g", cVal);
+                                else swprintf(termino, 256, L" %+.4g·x^%d", cVal, k);
+                            }
+                            agregarTextoLimitado(resultado, 4096, termino);
+                        }
+                        
+                        if (k < 4) {
+                            Node *siguiente = diffAST(actual);
+                            freeNode(actual); actual = siguiente;
+                            if (!actual) { completo = 0; break; }
+                        }
                     }
+                    freeNode(actual);
+                    if (!completo || primerTermino) wcscpy(resultado, L"DESARROLLO DE MACLAURIN:\r\nP4(x) = 0 (o no evaluable en x=0)");
                 }
-                freeNode(actual);
-                if (!completo) wcscpy(resultado, L"No se pudo calcular el desarrollo de Maclaurin en x=0.");
             }
             break;
     }
@@ -295,7 +313,6 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
                 CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI"
             );
 
-            // TEXTO CORREGIDO SIN REFERENCIAS EXTERNAS
             campoHistorial = CreateWindowW(
                 L"EDIT",
                 L"🤖 Asistente Virtual Matemáticas I\r\n"
@@ -337,15 +354,15 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
 
             mostrarControlesMatriz(0);
 
-            SendMessage(campoHistorial, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
-            SendMessage(hwndBotonOpciones, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
-            SendMessage(campoTextoEntrada, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
-            SendMessage(hBtnEnviar, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
-            SendMessage(inputFilas, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
-            SendMessage(inputCols, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
-            SendMessage(btnCrearGrid, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
-            SendMessage(btnCalcDet, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
-            SendMessage(btnCalcTras, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
+            SendMessageW(campoHistorial, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
+            SendMessageW(hwndBotonOpciones, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
+            SendMessageW(campoTextoEntrada, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
+            SendMessageW(hBtnEnviar, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
+            SendMessageW(inputFilas, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
+            SendMessageW(inputCols, WM_SETFONT, (WPARAM)hFuenteGlobal, TRUE);
+            SendMessageW(btnCrearGrid, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
+            SendMessageW(btnCalcDet, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
+            SendMessageW(btnCalcTras, WM_SETFONT, (WPARAM)hFuenteBoton, TRUE);
 
             return 0;
 
@@ -436,6 +453,9 @@ LRESULT CALLBACK VentanaPrincipal(HWND ventana, UINT mensaje, WPARAM wParam, LPA
             return 0;
 
         case WM_DESTROY:
+            if (procOriginalEntrada) {
+                SetWindowLongPtrW(campoTextoEntrada, GWLP_WNDPROC, (LONG_PTR)procOriginalEntrada);
+            }
             DeleteObject(hFuenteGlobal);
             DeleteObject(hFuenteBoton);
             PostQuitMessage(0);

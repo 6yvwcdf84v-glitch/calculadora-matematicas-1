@@ -3,6 +3,7 @@
 
 #include <windows.h>
 #include <math.h>
+#include <stddef.h>
 
 #define TEXTO_CAP 8192
 
@@ -19,6 +20,12 @@ typedef struct Node {
     struct Node *right;
 } Node;
 
+typedef struct {
+    const wchar_t *src;
+    int pos;
+    int error;
+} ParserContext;
+
 Node* createNumNode(double val);
 Node* createVarNode(void);
 Node* createOpNode(NodeType type, Node *left, Node *right);
@@ -28,6 +35,7 @@ Node* copyNode(const Node *n);
 
 Node* buildAST(const wchar_t *expr);
 Node* simplifyAST(Node *n);
+Node* simplifyASTPuntoFijo(Node *n);
 Node* diffAST(const Node *n);
 void astToString(const Node *n, wchar_t *buf);
 double evaluarAST(const Node *n, double x, int *ok);
